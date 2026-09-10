@@ -25,8 +25,11 @@ st.markdown(
     .nexus-title { color: var(--ink); font-family: Georgia, serif; font-size: 2.4rem; font-weight: 700; }
     div[data-testid="stChatMessage"], div[data-testid="stForm"] { border-radius: 4px; border: 1px solid var(--line); }
     .auth-card { max-width: 560px; margin: 10vh auto 0; padding: 2.5rem; background: white; border: 1px solid var(--line); border-radius: 4px; }
-    .square-panel { padding: 1.2rem; background: white; border: 1px solid var(--line); border-radius: 4px; }
-    button, [data-testid="stFileUploader"] section { border-radius: 4px !important; }
+    .stButton > button { background: var(--ink) !important; color: white !important; border: 1px solid var(--ink) !important; border-radius: 4px !important; }
+    .stButton > button:hover { background: #285509 !important; color: white !important; }
+    .stTextInput input, [data-testid="stChatInput"] textarea { background: white !important; color: var(--ink) !important; border-color: var(--line) !important; }
+    .stTextInput label, [data-testid="stChatInput"] label { color: var(--ink) !important; }
+    [data-testid="stChatInput"] button { color: var(--ink) !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -147,19 +150,7 @@ def parse_calendar(uploaded_file):
 
 def context_text():
     now = datetime.now(ZoneInfo("Europe/Rome"))
-    lines = [f"Ora italiana attuale: {now:%A %d %B %Y, %H:%M:%S}"]
-    weather = st.session_state.get("weather")
-    if weather:
-        lines.append(
-            "Meteo richiesto per {location}: {temperature}°C, percepiti {feels_like}°C, "
-            "umidità {humidity}%, vento {wind} km/h, codice meteo {weather_code}.".format(**weather)
-        )
-    events = st.session_state.get("events", [])
-    if events:
-        lines.append("Prossimi eventi calendario: " + "; ".join(
-            f"{event['title']} ({event['start']:%d/%m %H:%M})" for event in events[:8]
-        ))
-    return "\n".join(lines)
+    return f"Ora italiana attuale: {now:%A %d %B %Y, %H:%M:%S}"
 
 
 def history_for(username):
@@ -178,8 +169,8 @@ def history_for(username):
 def ask_nexus(prompt, attachment=None):
     system_prompt = (
         "Sei Nexus, un assistente personale rapido e preciso. Rispondi in italiano. "
-        "Usa il contesto dinamico fornito per rispondere a domande su ora, meteo, "
-        "posizione e calendario; se un dato manca, dichiaralo invece di inventarlo. "
+        "Usa l'ora corrente fornita nel contesto; per dati non disponibili, "
+        "dichiaralo invece di inventarli. "
         "Se ti chiedono chi ti ha creato, rispondi che sei stato creato da Crispino Gennaro.\n\n"
         f"CONTESTO DINAMICO:\n{context_text()}"
     )
@@ -231,46 +222,20 @@ with action_col:
             st.session_state.pop(key, None)
         st.rerun()
 
-with st.container(border=True):
-    st.markdown("#### Configura il contesto")
-    st.caption("Queste opzioni servono solo a dare a Nexus informazioni più precise.")
-    context_col, calendar_col, update_col = st.columns([2, 2, 1])
-    with context_col:
-        location = st.text_input(
-            "Località per il meteo", value=st.session_state.get("location", "Roma"),
-            key="context_location",
-        )
-    with calendar_col:
-        calendar_file = st.file_uploader("Calendario .ics", type=["ics"], key="context_calendar")
-    with update_col:
-        st.write("")
-        st.write("")
-        if st.button("Applica", use_container_width=True):
-            try:
-                st.session_state.weather = get_weather(location)
-                st.session_state.location = location
-                if calendar_file:
-                    st.session_state.events = parse_calendar(calendar_file)
-                st.success("Contesto aggiornato.")
-            except Exception as error:
-                st.error(f"Contesto non disponibile: {error}")
-    if st.session_state.get("weather"):
-        weather = st.session_state.weather
-        st.caption(f"Meteo: {weather['location']} · {weather['temperature']}°C · umidità {weather['humidity']}%")
-    if st.session_state.get("events"):
-        st.caption(f"Eventi calendario caricati: {len(st.session_state.events)}")
-
 if st.session_state.get("conversation_user") != username:
     st.session_state.pop("messages", None)
     st.session_state.conversation_user = username
 render_history(username)
-attachment = st.file_uploader(
-    "Allega un file o una foto", type=["jpg", "jpeg", "png", "webp", "gif", "pdf", "txt"],
-    key="chat_attachment",
+chat_value = st.chat_input(
+    "Scrivi a Nexus...",
+    accept_file=True,
+    file_type=["jpg", "jpeg", "png", "webp", "gif", "pdf", "txt"],
 )
-prompt = st.chat_input("Scrivi a Nexus...")
 
-if prompt or attachment:
+if chat_value:
+    prompt = chat_value if isinstance(chat_value, str) else chat_value.text
+    attachments = [] if isinstance(chat_value, str) else chat_value.files
+    attachment = attachments[0] if attachments else None
     visible_prompt = prompt or "Analizza questo allegato."
     st.session_state.messages.append({"role": "user", "content": visible_prompt})
     nexus.salva_messaggio(username, "user", visible_prompt)
