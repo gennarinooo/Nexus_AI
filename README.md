@@ -24,9 +24,10 @@ Su Streamlit Cloud, apri **Settings > Secrets** e inserisci:
 GEMINI_API_KEY = "la-tua-chiave-gemini"
 ```
 
-L'app Streamlit legge automaticamente questo secret. La sidebar permette di
-impostare una località per il meteo e di caricare un calendario `.ics`; questi
-dati vengono aggiunti al contesto dell'assistente insieme all'ora italiana.
+L'app Streamlit legge automaticamente questo secret. Dopo l'accesso, il pannello
+iniziale della pagina permette di impostare una località per il meteo e caricare
+un calendario `.ics`; questi dati vengono aggiunti al contesto dell'assistente
+insieme all'ora italiana.
 
 L'accesso ospite salva un identificatore casuale nel browser. Lo stesso dispositivo
 riutilizza quell'ID, così le conversazioni restano separate da quelle degli altri utenti.

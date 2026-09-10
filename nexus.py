@@ -95,6 +95,9 @@ def aggiorna_file_archivio():
 
 
 def salva_messaggio(username, ruolo, messaggio):
+    if str(username).startswith('Ospite_'):
+        return
+
     conn = sqlite3.connect('nexus_database.db')
     cursor = conn.cursor()
     cursor.execute(

@@ -13,17 +13,20 @@ from google import genai
 import nexus
 
 
-st.set_page_config(page_title="Nexus AI", page_icon="N", layout="centered")
+st.set_page_config(page_title="Nexus AI", page_icon="N", layout="wide")
 
 st.markdown(
     """
     <style>
-    :root { --ink: #163300; --lime: #9FE870; }
-    .stApp { background: #F4F8ED; color: #163300; }
-    [data-testid="stSidebar"] { background: #163300; }
-    [data-testid="stSidebar"] * { color: #F4F8ED; }
-    .nexus-title { color: #163300; font-family: Georgia, serif; font-size: 2.4rem; font-weight: 700; }
-    div[data-testid="stChatMessage"] { border-radius: 16px; }
+    :root { --ink: #163300; --lime: #9FE870; --paper: #F4F8ED; --line: #CAD8C2; }
+    .stApp { background: var(--paper); color: var(--ink); }
+    [data-testid="stSidebar"] { background: var(--ink); }
+    [data-testid="stSidebar"] * { color: var(--paper); }
+    .nexus-title { color: var(--ink); font-family: Georgia, serif; font-size: 2.4rem; font-weight: 700; }
+    div[data-testid="stChatMessage"], div[data-testid="stForm"] { border-radius: 4px; border: 1px solid var(--line); }
+    .auth-card { max-width: 560px; margin: 10vh auto 0; padding: 2.5rem; background: white; border: 1px solid var(--line); border-radius: 4px; }
+    .square-panel { padding: 1.2rem; background: white; border: 1px solid var(--line); border-radius: 4px; }
+    button, [data-testid="stFileUploader"] section { border-radius: 4px !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -36,6 +39,55 @@ def get_device_id():
         device_id = uuid.uuid4().hex
         st.query_params["device_id"] = device_id
     return device_id.upper()
+
+
+def account_action(username, password, action):
+    username = username.strip()
+    if not username or not password:
+        return False, "Inserisci username e password."
+    conn = __import__("sqlite3").connect("nexus_database.db")
+    try:
+        if action == "register":
+            conn.execute(
+                "INSERT INTO utenti (username, password) VALUES (?, ?)",
+                (username, password),
+            )
+            conn.commit()
+            return True, "Registrazione completata. Ora puoi accedere."
+        user = conn.execute(
+            "SELECT username FROM utenti WHERE username = ? AND password = ?",
+            (username, password),
+        ).fetchone()
+        return (True, "Accesso effettuato.") if user else (False, "Credenziali errate.")
+    except __import__("sqlite3").IntegrityError:
+        return False, "Username già esistente."
+    finally:
+        conn.close()
+
+
+def render_auth_screen():
+    st.markdown('<div class="auth-card">', unsafe_allow_html=True)
+    st.markdown('<div class="nexus-title">Nexus AI</div>', unsafe_allow_html=True)
+    st.caption("Accedi per continuare oppure usa Nexus come ospite.")
+    username = st.text_input("Username", key="auth_username")
+    password = st.text_input("Password", type="password", key="auth_password")
+    login_col, register_col, guest_col = st.columns(3)
+    if login_col.button("Accedi", use_container_width=True):
+        success, message = account_action(username, password, "login")
+        if success:
+            st.session_state.authenticated_user = username.strip()
+            st.rerun()
+        st.error(message)
+    if register_col.button("Registrati", use_container_width=True):
+        success, message = account_action(username, password, "register")
+        (st.success if success else st.error)(message)
+    if guest_col.button("Continua come ospite", use_container_width=True):
+        st.session_state.guest_device_id = get_device_id()
+        st.session_state.authenticated_user = f"Ospite_{st.session_state.guest_device_id}"
+        st.session_state.is_guest = True
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    return False
 
 
 def geocode(location):
@@ -111,6 +163,9 @@ def context_text():
 
 
 def history_for(username):
+    if username.startswith("Ospite_"):
+        return []
+
     conn = __import__("sqlite3").connect("nexus_database.db")
     rows = conn.execute(
         "SELECT ruolo, messaggio FROM chat_history WHERE username = ? ORDER BY id ASC",
@@ -158,31 +213,56 @@ def render_history(username):
             st.markdown(message["content"])
 
 
-device_id = get_device_id()
-username = f"Ospite_{device_id}"
+if "authenticated_user" not in st.session_state:
+    render_auth_screen()
+    st.stop()
 
-with st.sidebar:
-    st.markdown("## Nexus AI")
-    st.caption(f"ID dispositivo: {device_id}")
-    st.divider()
-    st.markdown("### Contesto")
-    location = st.text_input("Città o località", value=st.session_state.get("location", "Roma"))
-    if st.button("Aggiorna meteo", use_container_width=True):
-        try:
-            st.session_state.weather = get_weather(location)
-            st.session_state.location = location
-            st.success(f"Meteo aggiornato: {st.session_state.weather['location']}")
-        except Exception as error:
-            st.error(f"Meteo non disponibile: {error}")
-    calendar_file = st.file_uploader("Calendario .ics", type=["ics"])
-    if calendar_file:
-        st.session_state.events = parse_calendar(calendar_file)
-        st.caption(f"Eventi letti: {len(st.session_state.events)}")
-    st.divider()
-    st.caption("La posizione viene usata solo per la località meteo inserita.")
+username = st.session_state.authenticated_user
+is_guest = st.session_state.get("is_guest", False)
+top_col, action_col = st.columns([5, 1])
+with top_col:
+    st.markdown('<div class="nexus-title">Nexus AI</div>', unsafe_allow_html=True)
+    st.caption("Il tuo assistente personale, con contesto aggiornato.")
+    if is_guest:
+        st.caption(f"ID ospite di questo dispositivo: {st.session_state.guest_device_id}")
+with action_col:
+    if st.button("Esci", use_container_width=True):
+        for key in ("authenticated_user", "is_guest", "guest_device_id", "messages"):
+            st.session_state.pop(key, None)
+        st.rerun()
 
-st.markdown('<div class="nexus-title">Nexus AI</div>', unsafe_allow_html=True)
-st.caption("Il tuo assistente personale, con contesto aggiornato.")
+with st.container(border=True):
+    st.markdown("#### Configura il contesto")
+    st.caption("Queste opzioni servono solo a dare a Nexus informazioni più precise.")
+    context_col, calendar_col, update_col = st.columns([2, 2, 1])
+    with context_col:
+        location = st.text_input(
+            "Località per il meteo", value=st.session_state.get("location", "Roma"),
+            key="context_location",
+        )
+    with calendar_col:
+        calendar_file = st.file_uploader("Calendario .ics", type=["ics"], key="context_calendar")
+    with update_col:
+        st.write("")
+        st.write("")
+        if st.button("Applica", use_container_width=True):
+            try:
+                st.session_state.weather = get_weather(location)
+                st.session_state.location = location
+                if calendar_file:
+                    st.session_state.events = parse_calendar(calendar_file)
+                st.success("Contesto aggiornato.")
+            except Exception as error:
+                st.error(f"Contesto non disponibile: {error}")
+    if st.session_state.get("weather"):
+        weather = st.session_state.weather
+        st.caption(f"Meteo: {weather['location']} · {weather['temperature']}°C · umidità {weather['humidity']}%")
+    if st.session_state.get("events"):
+        st.caption(f"Eventi calendario caricati: {len(st.session_state.events)}")
+
+if st.session_state.get("conversation_user") != username:
+    st.session_state.pop("messages", None)
+    st.session_state.conversation_user = username
 render_history(username)
 attachment = st.file_uploader(
     "Allega un file o una foto", type=["jpg", "jpeg", "png", "webp", "gif", "pdf", "txt"],
