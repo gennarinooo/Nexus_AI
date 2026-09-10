@@ -1,3 +1,4 @@
-flask
-google-genai
-gunicorn
+streamlit>=1.40
+flask>=3.0
+google-genai>=1.0
+Pillow>=10.0

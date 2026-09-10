@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Nexus AI</title>
+    <style>
+        :root { --ink: #163300; --lime: #9fe870; --paper: #f4f8ed; --line: #dce8d5; --muted: #687763; }
+        * { box-sizing: border-box; } body { font-family: Arial, sans-serif; background: var(--paper); color: var(--ink); margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        header { background: white; padding: 17px max(20px, calc((100vw - 980px) / 2)); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); } h2 { margin: 0; font: 700 22px Georgia, serif; } h2 span { display: block; font: 12px Arial; color: var(--muted); margin-top: 4px; }
+        #chat-box { flex: 1; width: min(900px, 100%); margin: auto; padding: 30px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+        .message { padding: 14px 17px; border-radius: 16px; max-width: min(680px, 86%); line-height: 1.5; word-break: break-word; white-space: pre-wrap; } .user { background: var(--ink); color: white; align-self: flex-end; border-bottom-right-radius: 4px; } .nexus { background: white; border: 1px solid var(--line); align-self: flex-start; border-bottom-left-radius: 4px; }
+        .composer { width: min(900px, 100%); margin: 0 auto; padding: 12px 20px 24px; } .input-box { padding: 7px; background: white; border: 1px solid var(--line); border-radius: 16px; display: flex; gap: 8px; align-items: center; box-shadow: 0 10px 30px #16330012; } input { min-width: 0; flex: 1; padding: 13px 10px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 15px; } button { padding: 12px 17px; background: var(--ink); border: 0; border-radius: 10px; color: white; font-weight: bold; cursor: pointer; } button:hover { background: #285509; } .attach { color: var(--ink); background: var(--lime); padding: 12px; font-size: 18px; border-radius: 10px; cursor: pointer; } .logout-btn { background: transparent; border: 1px solid var(--line); color: var(--ink); font-size: 12px; }
+        img { max-width: min(500px, 100%); border-radius: 10px; margin-top: 10px; display: block; } #file-name { color: var(--muted); font-size: 12px; margin: 7px 4px 0; }
+        @media (max-width: 600px) { header { padding: 14px 16px; } #chat-box { padding: 20px 14px; } .composer { padding: 8px 12px 15px; } .message { max-width: 92%; } }
+    </style>
+</head>
+<body>
+    <header>
+        <h2>Nexus AI <span>{{ username }}</span></h2>
+        <button class="logout-btn" onclick="logout()">Esci</button>
+    </header>
+    <div id="chat-box">
+        <div class="message nexus">Benvenuto online. I sistemi Nexus sono operativi. Come posso aiutarti?</div>
+    </div>
+    <div class="composer"><div class="input-box">
+        <label class="attach" title="Allega un file o una foto">＋<input type="file" id="attachment" accept="image/*,.pdf,.txt" hidden onchange="showFile()"></label>
+        <input type="text" id="user-input" placeholder="Scrivi a Nexus..." onkeypress="checkEnter(event)">
+        <button onclick="sendMessage()">Invia</button>
+    </div><div id="file-name"></div></div>
+    <script>
+        async function sendMessage() {
+            let input = document.getElementById('user-input');
+            let text = input.value.trim();
+            let file = document.getElementById('attachment').files[0];
+            if(!text && !file) return;
+            
+            let box = document.getElementById('chat-box');
+            box.innerHTML += `<div class="message user">${escapeHtml(text)}${file ? `<br><small>Allegato: ${escapeHtml(file.name)}</small>` : ''}</div>`;
+            input.value = '';
+            box.scrollTop = box.scrollHeight;
+
+            let form = new FormData();
+            form.append('message', text);
+            if(file) form.append('attachment', file);
+            document.getElementById('attachment').value = '';
+            document.getElementById('file-name').textContent = '';
+            let res = await fetch('/chat', { method: 'POST', body: form });
+            let data = await res.json();
+
+            let htmlResp = `<div class="message nexus">${escapeHtml(data.response || data.error || 'Nessuna risposta.')}`;
+            if(data.image_url) {
+                htmlResp += `<img src="${data.image_url}">`;
+            }
+            htmlResp += `</div>`;
+            box.innerHTML += htmlResp;
+            box.scrollTop = box.scrollHeight;
+        }
+        function showFile() { let file = document.getElementById('attachment').files[0]; document.getElementById('file-name').textContent = file ? `Allegato: ${file.name}` : ''; }
+        function escapeHtml(value) { let div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
+        function checkEnter(e) { if(e.key === 'Enter') sendMessage(); }
+        async function logout() {
+            await fetch('/logout', { method: 'POST' });
+            location.reload();
+        }
+    </script>
+</body>
+</html>

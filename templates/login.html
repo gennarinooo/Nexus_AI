@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Nexus | Accesso</title>
+    <style>
+        :root { --ink: #163300; --lime: #9fe870; --paper: #f4f8ed; --muted: #60705a; }
+        * { box-sizing: border-box; } body { font-family: Georgia, serif; background: var(--paper); color: var(--ink); display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px; }
+        .card { width: min(440px, 100%); padding: 42px; background: white; border: 1px solid #dce8d5; border-radius: 24px; box-shadow: 0 24px 70px #16330018; }
+        .mark { width: 48px; height: 48px; display: grid; place-items: center; background: var(--lime); border-radius: 14px; font: 700 24px Arial; }
+        h1 { margin: 22px 0 8px; font-size: 36px; letter-spacing: -1px; } p { color: var(--muted); line-height: 1.5; }
+        input { width: 100%; padding: 14px 16px; margin: 7px 0; border-radius: 10px; border: 1px solid #cbd9c5; background: #fbfdf9; color: var(--ink); font: inherit; }
+        button { width: 100%; padding: 14px 16px; background: var(--ink); border: 0; border-radius: 10px; color: white; font-weight: bold; cursor: pointer; margin-top: 9px; } button:hover { background: #285509; }
+        .reg-btn { background: var(--lime); color: var(--ink); } .guest-btn { background: transparent; color: var(--ink); border: 1px solid #cbd9c5; }
+        #error { min-height: 22px; font: 14px Arial; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="mark">N</div><h1>Nexus AI</h1>
+        <p>Un assistente rapido per pensare, creare e analizzare.</p>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="login()">Accedi</button>
+        <button class="reg-btn" onclick="registra()">Registrati</button>
+        <button class="guest-btn" onclick="guestLogin()">Continua come Ospite</button>
+        <p id="error" style="color: #ef4444;"></p>
+    </div>
+    <script>
+        async function login() {
+            let u = document.getElementById('username').value;
+            let p = document.getElementById('password').value;
+            let res = await fetch('/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: u, password: p}) });
+            let data = await res.json();
+            if(data.success) location.reload();
+            else document.getElementById('error').innerText = data.error;
+        }
+        async function registra() {
+            let u = document.getElementById('username').value;
+            let p = document.getElementById('password').value;
+            if(!u || !p) { document.getElementById('error').innerText = "Inserisci username e password"; return; }
+            let res = await fetch('/registra', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: u, password: p}) });
+            let data = await res.json();
+            if(data.success) { document.getElementById('error').style.color = "#10b981"; document.getElementById('error').innerText = "Registrato! Ora puoi accedere."; }
+            else { document.getElementById('error').style.color = "#ef4444"; document.getElementById('error').innerText = data.error; }
+        }
+        async function guestLogin() {
+            let deviceId = localStorage.getItem('nexus_device_id');
+            if (!deviceId) { deviceId = crypto.randomUUID().replaceAll('-', ''); localStorage.setItem('nexus_device_id', deviceId); }
+            let res = await fetch('/guest', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({device_id: deviceId}) });
+            let data = await res.json();
+            if(data.success) location.reload();
+        }
+    </script>
+</body>
+</html>
