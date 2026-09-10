@@ -6,14 +6,20 @@ import sqlite3
 import urllib.parse
 import urllib.request
 import uuid
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from PIL import Image
 from flask import Flask, jsonify, render_template, request, session
 from google import genai
 
+logging.basicConfig(level=logging.INFO)
+MODEL_NAME = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
+DB_PATH = os.environ.get('NEXUS_DB_PATH', 'nexus_database.db')
+
 app = Flask(__name__)
-app.secret_key = 'nexus_secret_key_sicreta'
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '')
 
 # Il segreto resta fuori dal repository. Impostare GEMINI_API_KEY nell'ambiente.
 client = None
@@ -29,13 +35,6 @@ def get_client():
     if client is None:
         api_key = os.environ.get('GEMINI_API_KEY')
         if not api_key:
-            try:
-                import streamlit as st
-
-                api_key = st.secrets.get('GEMINI_API_KEY')
-            except (ImportError, FileNotFoundError, KeyError):
-                api_key = None
-        if not api_key:
             raise RuntimeError('GEMINI_API_KEY non configurata')
         client = genai.Client(api_key=api_key)
     return client
@@ -43,7 +42,7 @@ def get_client():
 
 # --- DATABASE ---
 def inizializza_db():
-    conn = sqlite3.connect('nexus_database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS utenti (
@@ -73,7 +72,7 @@ def ora_italiana():
 
 def aggiorna_file_archivio():
     """Aggiorna automaticamente il file di testo nel Codespace con tutte le chat divise per utente o ID ospite."""
-    conn = sqlite3.connect('nexus_database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT DISTINCT username FROM chat_history ORDER BY timestamp DESC')
     utenti = [row[0] for row in cursor.fetchall()]
@@ -95,10 +94,7 @@ def aggiorna_file_archivio():
 
 
 def salva_messaggio(username, ruolo, messaggio):
-    if str(username).startswith('Ospite_'):
-        return
-
-    conn = sqlite3.connect('nexus_database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
         'INSERT INTO chat_history (username, ruolo, messaggio, timestamp)'
@@ -121,7 +117,7 @@ def traduci_e_ottimizza_prompt(prompt_utente):
             ' detailed). Restituisci SOLO il testo del prompt in inglese.'
         )
         response = get_client().models.generate_content(
-            model='gemini-3.6-flash',
+            model=MODEL_NAME,
             contents=f'{istruzione}\n\nRichiesta utente: {prompt_utente}',
         )
         if response and response.text:
@@ -196,24 +192,40 @@ def leggi_allegato(file):
 # --- ROTTE WEB ---
 @app.route('/')
 def index():
+    return render_template('login.html')
+
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'}), 200
+
+
+@app.route('/app')
+def app_page():
     if 'utente' not in session:
         return render_template('login.html')
-    return render_template('chat.html', username=session['utente'])
+    return render_template(
+        'chat.html',
+        username=session['utente'],
+        is_guest=session['utente'].startswith('Ospite_'),
+    )
 
 
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
-    user = data.get('username')
+    user = (data.get('username') or '').strip()
     pwd = data.get('password')
 
-    conn = sqlite3.connect('nexus_database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT * FROM utenti WHERE username = ? AND password = ?', (user, pwd)
+        'SELECT username FROM utenti WHERE LOWER(username) = LOWER(?) AND password = ?',
+        (user, pwd),
     )
-    if cursor.fetchone():
-        session['utente'] = user
+    account = cursor.fetchone()
+    if account:
+        session['utente'] = account[0]
         conn.close()
         return jsonify({'success': True})
     conn.close()
@@ -223,10 +235,13 @@ def login():
 @app.route('/registra', methods=['POST'])
 def registra():
     data = request.json
-    user = data.get('username')
+    user = (data.get('username') or '').strip()
     pwd = data.get('password')
 
-    conn = sqlite3.connect('nexus_database.db')
+    if not user or not pwd:
+        return jsonify({'success': False, 'error': 'Username e password sono obbligatori'})
+
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
         cursor.execute(
@@ -245,7 +260,7 @@ def guest():
     data = request.get_json(silent=True) or {}
     device_id = normalizza_id_dispositivo(data.get('device_id')) or uuid.uuid4().hex
     session['utente'] = f'Ospite_{device_id.upper()}'
-    session.permanent = True
+    session.permanent = False
     return jsonify({'success': True, 'device_id': device_id})
 
 
@@ -253,6 +268,40 @@ def guest():
 def logout():
     session.pop('utente', None)
     return jsonify({'success': True})
+
+
+@app.route('/history')
+def history():
+    username = session.get('utente')
+    if not username or username.startswith('Ospite_'):
+        return jsonify({'history': []})
+
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        'SELECT ruolo, messaggio, timestamp FROM chat_history '
+        'WHERE username = ? ORDER BY id ASC',
+        (username,),
+    ).fetchall()
+    conn.close()
+    return jsonify({
+        'history': [
+            {'role': 'user' if row[0] == 'user' else 'Nexus', 'message': row[1], 'timestamp': row[2]}
+            for row in rows
+        ]
+    })
+
+
+@app.route('/admin')
+def admin():
+    if not ADMIN_USERNAME or session.get('utente') != ADMIN_USERNAME:
+        return 'Non autorizzato', 403
+
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        'SELECT username, timestamp, ruolo, messaggio FROM chat_history ORDER BY id ASC'
+    ).fetchall()
+    conn.close()
+    return render_template('admin.html', logs=rows)
 
 
 @app.route('/chat', methods=['POST'])
@@ -289,7 +338,7 @@ def chat():
             if allegato:
                 contenuti.append(leggi_allegato(allegato))
             response = get_client().models.generate_content(
-                model='gemini-3.6-flash',
+                model=MODEL_NAME,
                 contents=contenuti,
                 config=genai.types.GenerateContentConfig(
                     system_instruction=system_prompt, temperature=0.7
@@ -298,7 +347,11 @@ def chat():
             risposta_nexus = response.text
         except ValueError as e:
             risposta_nexus = str(e)
+        except RuntimeError as e:
+            logging.error('Configurazione Gemini non disponibile: %s', e)
+            risposta_nexus = str(e)
         except Exception as e:
+            logging.exception('Errore durante la richiesta Gemini')
             risposta_nexus = 'Nexus non è raggiungibile in questo momento.'
 
         salva_messaggio(username, 'Nexus', risposta_nexus)
